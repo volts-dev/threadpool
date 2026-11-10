@@ -57,25 +57,32 @@ func TestNoPool(t *testing.T) {
 	t.Logf("memory usage:%d MB", curMem)
 }
 
-func TestAntsPool(t *testing.T) {
-	defer Close()
-	Active(true)
+func TestPool(t *testing.T) {
+	pool := NewPool()
+	defer pool.Close()
+
+	pool.Config(
+		WithMaxThread(1000),
+		WithCapacity(5000),
+	)
+
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		_ = AddTask(func() {
+		_ = pool.AddTask(func() {
 			demoFunc()
 			wg.Done()
 		})
 	}
 	wg.Wait()
 
-	t.Logf("pool, capacity:%d", Cap())
-	t.Logf("pool, running thread number:%d", ThreadCount())
-	t.Logf("pool, task number:%d", TaskCount())
+	t.Logf("pool, capacity:%d", pool.Cap())
+	t.Logf("pool, running thread number:%d", pool.ThreadCount())
+	t.Logf("pool, task number:%d", pool.TaskCount())
 
 	mem := runtime.MemStats{}
 	runtime.ReadMemStats(&mem)
 	curMem = mem.TotalAlloc/MiB - curMem
 	t.Logf("memory usage:%d MB", curMem)
+
 }

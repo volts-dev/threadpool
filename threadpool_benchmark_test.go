@@ -22,7 +22,7 @@ func BenchmarkGoroutines(b *testing.B) {
 func BenchmarkPool(b *testing.B) {
 	var wg sync.WaitGroup
 	p := NewPool(
-		MaxThread(BenchAntsSize),
+		WithMaxThread(BenchAntsSize),
 		WithExpiryDuration(DefaultExpiredTime),
 	)
 	defer p.Close()
@@ -41,9 +41,9 @@ func BenchmarkPool(b *testing.B) {
 	b.StopTimer()
 }
 
-func BenchmarkAntsPoolThroughput(b *testing.B) {
+func BenchmarkPoolThroughput(b *testing.B) {
 	p := NewPool(
-		MaxThread(BenchAntsSize),
+		WithMaxThread(BenchAntsSize),
 		WithExpiryDuration(DefaultExpiredTime),
 	)
 	defer p.Close()

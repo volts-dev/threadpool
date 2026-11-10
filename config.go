@@ -6,18 +6,6 @@ import (
 	"time"
 )
 
-// Option represents the optional function.
-type (
-	Option  func(cfg *TConfig)
-	TConfig struct {
-		ExpiryDuration time.Duration
-		MinThread      int
-		MaxThread      int
-		MaxTasks       int
-		Capacity       int32
-	}
-)
-
 const (
 	RUNNING = iota // RUNNING represents that the pool is Actived.
 	STOPPED
@@ -29,21 +17,34 @@ var (
 	errQueueIsFull = errors.New("the queue is full")
 	// errQueueIsReleased will be returned when trying to insert item to a released worker queue.
 	errQueueIsReleased = errors.New("the queue length is zero")
-	defaultPool        = NewPool()
+)
+
+// Option represents the optional function.
+type (
+	Option  func(cfg *TConfig)
+	TConfig struct {
+		ExpiryDuration time.Duration
+		MinThread      int32
+		MaxThread      int32
+		Capacity       int32
+		Delay          time.Duration
+	}
 )
 
 func newConfig(opts ...Option) *TConfig {
-	cores := runtime.GOMAXPROCS(runtime.NumCPU())
+	cores := int32(runtime.GOMAXPROCS(runtime.NumCPU()))
 	cfg := &TConfig{
-		ExpiryDuration: 600 * time.Second,
+		ExpiryDuration: 3 * time.Second,
+		Delay:          300 * time.Millisecond,
 		MinThread:      1,
 		MaxThread:      cores * 2,
-		MaxTasks:       cores * 8,
+		Capacity:       cores * 10,
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
+
 	return cfg
 }
 
@@ -54,15 +55,17 @@ func WithExpiryDuration(expiryDuration time.Duration) Option {
 	}
 }
 
-func MaxThread(cnt int) Option {
+// 最大处理线程
+func WithMaxThread(cnt int) Option {
 	return func(cfg *TConfig) {
-		cfg.MaxThread = cnt
-		cfg.MaxTasks = cnt * 3
+		cfg.MaxThread = int32(cnt)
+		cfg.Capacity = int32(cnt) * 3
 	}
 }
 
-func MaxTasks(cnt int) Option {
+// 任务容量
+func WithCapacity(cnt int) Option {
 	return func(cfg *TConfig) {
-		cfg.MaxTasks = cnt
+		cfg.Capacity = int32(cnt)
 	}
 }

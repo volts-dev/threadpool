@@ -1,7 +1,10 @@
 package threadpool
 
 import (
-	"sync"
+	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -20,16 +23,18 @@ type (
 		// recycleTime will be updated when putting a worker back into queue.
 		recycleTime time.Time
 	}
-
-	threadQueue struct {
-		sync.RWMutex
-		pool    *TThreadPool
-		threads []*thread
-		expiry  []*thread
-
-		size int
-	}
 )
+
+func Goid() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	id, err := strconv.Atoi(idField)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
+	}
+	return id
+}
 
 func NewThread(pool *TThreadPool) *thread {
 	t := &thread{
@@ -40,27 +45,28 @@ func NewThread(pool *TThreadPool) *thread {
 	return t
 }
 
-func (self *thread) Run() {
+func (self *thread) Start() {
 	go func() {
 		pool := self.pool
-
+		pool.incThread()
 		defer func(pool *TThreadPool) {
-			pool.threadCache.Put(self) // 回收为缓存
+			pool.threads.Put(self) // 回收为缓存
 			pool.decThread()
 		}(pool)
 
 		cond := self.pool.cond
 		for {
-			// 待工开关
-			cond.L.Lock()
-			cond.Wait()
-			cond.L.Unlock()
+
 			if !pool.Active() {
-				continue
+				// 待工开关
+				cond.L.Lock()
+				cond.Wait()
+				cond.L.Unlock()
+				//	continue
 			}
 
 			// 检测线程数
-			if int32(atomic.LoadInt32(&pool.threadCount)) > int32(pool.config.MaxThread) {
+			if (atomic.LoadInt32(&pool.threadCount)) > int32(pool.config.MaxThread) {
 				return // 释放线程
 			}
 
@@ -91,71 +97,4 @@ func (self *thread) Run() {
 		}
 
 	}()
-}
-
-func newThreadQueue(pool *TThreadPool) *threadQueue {
-	return &threadQueue{
-		pool:    pool,
-		threads: make([]*thread, 0),
-	}
-}
-
-func (self *threadQueue) Count() int {
-	return self.size
-}
-
-func (self *threadQueue) Put(thread ...*thread) error {
-	defer self.RUnlock()
-	self.RLock()
-
-	if self.size == 0 {
-		return errQueueIsReleased
-	}
-
-	if self.size == self.pool.config.MaxThread {
-		return errQueueIsFull
-	}
-
-	self.threads = append(self.threads, thread...)
-	self.size = len(self.threads)
-	return nil
-}
-
-func (self *threadQueue) Get() *thread {
-	defer self.RUnlock()
-	self.RLock()
-
-	cnt := self.size
-	if cnt == 0 {
-		return nil
-	}
-
-	t := self.threads[0]
-	self.threads = self.threads[1:]
-	self.size = len(self.threads)
-	return t
-}
-
-func (self *threadQueue) Clear() {
-	if self.size == 0 {
-		return
-	}
-
-	for {
-		t := self.Get()
-		if t == nil {
-			return
-		}
-
-		t.task <- nil
-	}
-}
-
-func (self *threadQueue) retrieveExpiry(duration time.Duration) []*thread {
-	cnt := self.size
-	if cnt == 0 {
-		return nil
-	}
-
-	return nil
 }

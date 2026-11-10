@@ -4,19 +4,19 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/volts-dev/utils"
 )
 
 type (
 	TThreadPool struct {
-		cond   *sync.Cond // cond for waiting to get a idle worker.
-		config *TConfig
-		//capacity    int32
-		threadCount int32
-		taskCount   int32
-		state       int32 // state is used to notice the pool to closed itself.
-		threads     *threadQueue
+		cond        *sync.Cond // cond for waiting to get a idle worker.
+		config      *TConfig
+		threadCount int32       // num of thread are running
+		taskCount   int32       //
+		state       int32       // state is used to notice the pool to closed itself.
 		tasks       chan func() // 任务列队
-		threadCache sync.Pool
+		threads     *threadQueue
 	}
 )
 
@@ -27,13 +27,9 @@ func NewPool(opts ...Option) *TThreadPool {
 		state:  STOPPED, // 初始状态为暂停状态不处理任务 必须调用Active(true)
 		config: cfg,
 		cond:   sync.NewCond(&sync.Mutex{}),
-		tasks:  make(chan func(), cfg.MaxTasks),
+		tasks:  make(chan func(), cfg.Capacity),
 	}
 	pool.threads = newThreadQueue(pool)
-	pool.threadCache.New = func() interface{} {
-		return NewThread(pool)
-	}
-	pool.Active(true)
 
 	// manager thread
 	go func(p *TThreadPool) {
@@ -45,23 +41,41 @@ func NewPool(opts ...Option) *TThreadPool {
 				break
 			}
 
+			// 确保最小线程
+			if p.threadCount < p.config.MinThread {
+				num := p.config.MinThread - p.threadCount
+				p.AddThread(int(num))
+			}
+
+			// 弹性添加线程
+			if p.taskCount > 0 && p.threadCount < p.config.MaxThread {
+				if p.taskCount > p.config.MaxThread { // 任务量大于线程池容量 直接开最大
+					p.AddThread(int(p.config.MaxThread - p.threadCount))
+				} else {
+					num := utils.MaxInt(int(p.taskCount-p.threadCount), 0)
+					p.AddThread(num)
+				}
+			}
 		}
 	}(pool)
 
-	pool.AddThread(cfg.MaxThread)
+	pool.AddThread(int(cfg.MinThread))
+	pool.Active(true)
 	return pool
 }
 
-func (self *TThreadPool) Init(opts ...Option) {
+func (self *TThreadPool) Config(opts ...Option) *TConfig {
 	for _, opt := range opts {
 		opt(self.config)
 	}
+
+	return self.config
 }
 
 // clear all task
 func (self *TThreadPool) Clear() {
 	close(self.tasks)
-	self.tasks = make(chan func(), self.config.MaxTasks)
+	self.tasks = make(chan func(), self.config.Capacity)
 }
 
 func (self *TThreadPool) Close() {
@@ -70,8 +84,8 @@ func (self *TThreadPool) Close() {
 }
 
 // Cap returns the capacity of this pool.
-func (p *TThreadPool) Cap() int {
-	return len(p.tasks)
+func (self *TThreadPool) Cap() int {
+	return int(self.config.Capacity)
 }
 
 // 设置激活状态
@@ -113,16 +127,12 @@ func (self *TThreadPool) AddTask(task func()) error {
 func (self *TThreadPool) AddThread(num ...int) {
 	if num != nil {
 		for i := 0; i < num[0]; i++ {
-			t := self.threadCache.Get().(*thread)
+			t := self.threads.Get()
 			t.Start()
-			self.threads.Put(t)
-			self.incThread()
 		}
 	} else {
-		t := self.threadCache.Get().(*thread)
+		t := self.threads.Get()
 		t.Start()
-		self.threads.Put(t)
-		self.incThread()
 	}
 }
 
@@ -152,32 +162,4 @@ func (self *TThreadPool) incTask() {
 // decRunning decreases the number of the currently running goroutines.
 func (self *TThreadPool) decTask() {
 	atomic.AddInt32(&self.taskCount, -1)
-}
-
-func Init(opts ...Option) {
-	defaultPool.Init(opts...)
-}
-
-func Cap() int {
-	return defaultPool.Cap()
-}
-
-func Close() {
-	defaultPool.Close()
-}
-
-func Active(sw ...bool) bool {
-	return defaultPool.Active(sw...)
-}
-
-func ThreadCount() int {
-	return defaultPool.ThreadCount()
-}
-
-func TaskCount() int {
-	return defaultPool.TaskCount()
-}
-
-func AddTask(task func()) error {
-	return defaultPool.AddTask(task)
 }
